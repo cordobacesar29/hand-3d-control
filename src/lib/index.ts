@@ -1,1 +1,1 @@
-export { handToWorld, getIndexTip, isPinching } from './handToWorld';
+export { handToWorld, getIndexTip, isPinching, countExtendedFingers } from './handToWorld';

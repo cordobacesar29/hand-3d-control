@@ -28,8 +28,8 @@ export function handToWorld(
   landmark: Landmark3D,
   config: MappingConfig = DEFAULT_CONFIG
 ): WorldCoords {
-  // Invert X because camera is mirrored
-  const normalizedX = 1 - landmark.x;
+  // Use X directly (video is already mirrored via CSS scale-x-[-1])
+  const normalizedX = landmark.x;
   // Invert Y because screen Y is top-down, world Y is bottom-up
   const normalizedY = 1 - landmark.y;
   // MediaPipe Z is roughly [-0.3, 0.3] relative to wrist
@@ -71,4 +71,51 @@ export function isPinching(landmarks: Landmark3D[], threshold = 0.05): boolean {
   );
 
   return distance < threshold;
+}
+
+/**
+ * Count extended fingers (0-5)
+ *
+ * For index, middle, ring, pinky: extended if TIP.y < PIP.y
+ * (Y=0 is top of screen, so lower Y = higher in world)
+ *
+ * For thumb: extended if TIP is far enough from palm center (lateral extension)
+ */
+export function countExtendedFingers(landmarks: Landmark3D[]): number {
+  if (landmarks.length < 21) return 0;
+
+  let count = 0;
+
+  // Finger definitions: [MCP, PIP, TIP]
+  const fingers = [
+    { pip: 6, tip: 8 },   // Index
+    { pip: 10, tip: 12 }, // Middle
+    { pip: 14, tip: 16 }, // Ring
+    { pip: 18, tip: 20 }, // Pinky
+  ];
+
+  // Check index, middle, ring, pinky
+  for (const { pip, tip } of fingers) {
+    const pipLandmark = landmarks[pip];
+    const tipLandmark = landmarks[tip];
+    if (pipLandmark && tipLandmark && tipLandmark.y < pipLandmark.y) {
+      count++;
+    }
+  }
+
+  // Thumb: check if tip is far from wrist on X axis
+  const wrist = landmarks[0];
+  const thumbTip = landmarks[4];
+  const thumbMcp = landmarks[2];
+
+  if (wrist && thumbTip && thumbMcp) {
+    // Thumb is extended if tip is further from wrist than MCP
+    const tipDistance = Math.abs(thumbTip.x - wrist.x);
+    const mcpDistance = Math.abs(thumbMcp.x - wrist.x);
+    if (tipDistance > mcpDistance) {
+      count++;
+    }
+  }
+
+  return count;
 }

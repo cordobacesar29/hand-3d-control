@@ -1,7 +1,7 @@
 import type { HandLandmarks, HandsConfig, Landmark3D } from '../types/hand';
 
 const DEFAULT_CONFIG: HandsConfig = {
-  maxNumHands: 1,
+  maxNumHands: 2,
   modelComplexity: 1,
   minDetectionConfidence: 0.7,
   minTrackingConfidence: 0.5,
