@@ -3,6 +3,7 @@ import { Scene } from './scene';
 import { useHandControl } from './hooks/useHandControl';
 import { useScene } from './hooks/useScene';
 import { LandmarkOverlay, DualFingerCountIndicator } from './components/feedback';
+import { SignGame } from './components/game';
 
 // Y offset so cube floats above palm
 const CUBE_Y_OFFSET = 0.15;
@@ -31,6 +32,7 @@ function App() {
   } = useScene();
 
   const [showVideo, setShowVideo] = useState(true);
+  const [showGame, setShowGame] = useState(false);
   const [windowSize, setWindowSize] = useState({ width: window.innerWidth, height: window.innerHeight });
 
   // Track window resize for LandmarkOverlay dimensions
@@ -143,6 +145,16 @@ function App() {
             {showVideo ? 'Hide' : 'Show'} Video
           </button>
           <button
+            onClick={() => setShowGame(!showGame)}
+            className={`px-3 py-1.5 text-sm rounded transition-colors ${
+              showGame
+                ? 'bg-purple-600 hover:bg-purple-500'
+                : 'bg-purple-700 hover:bg-purple-600'
+            }`}
+          >
+            {showGame ? 'Close' : 'Play'} Sign Game
+          </button>
+          <button
             onClick={isTracking ? stopTracking : startTracking}
             className={`px-4 py-1.5 text-sm rounded transition-colors ${
               isTracking
@@ -164,7 +176,7 @@ function App() {
       {/* Finger count indicator */}
       <div
         className={`absolute bottom-4 left-4 z-20 transition-opacity ${
-          isTracking ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          isTracking && !showGame ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
         <DualFingerCountIndicator
@@ -174,6 +186,15 @@ function App() {
           isTracking={isTracking}
         />
       </div>
+
+      {/* Sign language learning game */}
+      {showGame && (
+        <SignGame
+          landmarks={hands[0]?.landmarks ?? null}
+          isTracking={isTracking}
+          onClose={() => setShowGame(false)}
+        />
+      )}
 
       {/* Instructions overlay */}
       {!isTracking && (

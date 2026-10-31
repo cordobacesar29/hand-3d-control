@@ -74,6 +74,53 @@ export function isPinching(landmarks: Landmark3D[], threshold = 0.05): boolean {
 }
 
 /**
+ * Check if thumb is extended
+ *
+ * Thumb is extended if tip is further from wrist than MCP (lateral extension)
+ */
+function isThumbExtended(landmarks: Landmark3D[]): boolean {
+  const wrist = landmarks[0];
+  const thumbTip = landmarks[4];
+  const thumbMcp = landmarks[2];
+
+  if (!wrist || !thumbTip || !thumbMcp) return false;
+
+  const tipDistance = Math.abs(thumbTip.x - wrist.x);
+  const mcpDistance = Math.abs(thumbMcp.x - wrist.x);
+  return tipDistance > mcpDistance;
+}
+
+/**
+ * Check if a finger (non-thumb) is extended
+ *
+ * Extended if TIP.y < PIP.y (Y=0 is top of screen)
+ */
+function isFingerExtended(landmarks: Landmark3D[], pipIndex: number, tipIndex: number): boolean {
+  const pipLandmark = landmarks[pipIndex];
+  const tipLandmark = landmarks[tipIndex];
+  return !!(pipLandmark && tipLandmark && tipLandmark.y < pipLandmark.y);
+}
+
+/**
+ * Get extended state for each finger
+ *
+ * Returns [thumb, index, middle, ring, pinky] as booleans
+ */
+export function getExtendedFingersArray(landmarks: Landmark3D[]): [boolean, boolean, boolean, boolean, boolean] {
+  if (landmarks.length < 21) {
+    return [false, false, false, false, false];
+  }
+
+  return [
+    isThumbExtended(landmarks),
+    isFingerExtended(landmarks, 6, 8),   // Index: PIP=6, TIP=8
+    isFingerExtended(landmarks, 10, 12), // Middle: PIP=10, TIP=12
+    isFingerExtended(landmarks, 14, 16), // Ring: PIP=14, TIP=16
+    isFingerExtended(landmarks, 18, 20), // Pinky: PIP=18, TIP=20
+  ];
+}
+
+/**
  * Count extended fingers (0-5)
  *
  * For index, middle, ring, pinky: extended if TIP.y < PIP.y
@@ -82,40 +129,5 @@ export function isPinching(landmarks: Landmark3D[], threshold = 0.05): boolean {
  * For thumb: extended if TIP is far enough from palm center (lateral extension)
  */
 export function countExtendedFingers(landmarks: Landmark3D[]): number {
-  if (landmarks.length < 21) return 0;
-
-  let count = 0;
-
-  // Finger definitions: [MCP, PIP, TIP]
-  const fingers = [
-    { pip: 6, tip: 8 },   // Index
-    { pip: 10, tip: 12 }, // Middle
-    { pip: 14, tip: 16 }, // Ring
-    { pip: 18, tip: 20 }, // Pinky
-  ];
-
-  // Check index, middle, ring, pinky
-  for (const { pip, tip } of fingers) {
-    const pipLandmark = landmarks[pip];
-    const tipLandmark = landmarks[tip];
-    if (pipLandmark && tipLandmark && tipLandmark.y < pipLandmark.y) {
-      count++;
-    }
-  }
-
-  // Thumb: check if tip is far from wrist on X axis
-  const wrist = landmarks[0];
-  const thumbTip = landmarks[4];
-  const thumbMcp = landmarks[2];
-
-  if (wrist && thumbTip && thumbMcp) {
-    // Thumb is extended if tip is further from wrist than MCP
-    const tipDistance = Math.abs(thumbTip.x - wrist.x);
-    const mcpDistance = Math.abs(thumbMcp.x - wrist.x);
-    if (tipDistance > mcpDistance) {
-      count++;
-    }
-  }
-
-  return count;
+  return getExtendedFingersArray(landmarks).filter(Boolean).length;
 }

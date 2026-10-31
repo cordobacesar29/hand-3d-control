@@ -1,0 +1,1 @@
+export { SignGame } from './SignGame';
