@@ -3,15 +3,15 @@ import { OrbitControls, Grid } from '@react-three/drei';
 import { InteractiveCube } from './InteractiveCube';
 import { InteractiveSphere } from './InteractiveSphere';
 import { InteractiveCone } from './InteractiveCone';
-import { HandCursor } from './HandCursor';
-import type { SceneObject } from '../hooks/useScene';
+import { HandCube } from './HandCube';
+import type { SceneObject, HandCube as HandCubeType } from '../hooks/useScene';
 
 interface SceneProps {
   objects: SceneObject[];
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  handPosition: [number, number, number] | null;
-  isGrabbing: boolean;
+  leftCube: HandCubeType;
+  rightCube: HandCubeType;
   sceneRotationY?: number;
 }
 
@@ -51,13 +51,13 @@ export function Scene({
   objects,
   selectedId,
   onSelect,
-  handPosition,
-  isGrabbing,
+  leftCube,
+  rightCube,
   sceneRotationY = 0,
 }: SceneProps) {
   return (
     <Canvas
-      camera={{ position: [0, 2, 5], fov: 75 }}
+      camera={{ position: [0, 1.5, -4], fov: 75 }}
       gl={{ alpha: true }}
       style={{ background: 'transparent' }}
       dpr={[1, 2]}
@@ -86,8 +86,12 @@ export function Scene({
         ))}
       </group>
 
-      {handPosition && (
-        <HandCursor position={handPosition} isGrabbing={isGrabbing} />
+      {/* Hand-following cubes */}
+      {leftCube.visible && (
+        <HandCube position={leftCube.position} color="#3b82f6" />
+      )}
+      {rightCube.visible && (
+        <HandCube position={rightCube.position} color="#22c55e" />
       )}
 
       <OrbitControls

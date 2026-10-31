@@ -4,7 +4,8 @@ import { useHandControl } from './hooks/useHandControl';
 import { useScene } from './hooks/useScene';
 import { LandmarkOverlay, DualFingerCountIndicator } from './components/feedback';
 
-type OwningHand = 'left' | 'right' | null;
+// Y offset so cube floats above palm
+const CUBE_Y_OFFSET = 0.15;
 
 function App() {
   const {
@@ -19,10 +20,17 @@ function App() {
     stopTracking,
   } = useHandControl();
 
-  const { objects, selectedId, setSelected, updateObjectPosition } = useScene();
+  const {
+    objects,
+    selectedId,
+    leftCube,
+    rightCube,
+    setSelected,
+    updateLeftCube,
+    updateRightCube,
+  } = useScene();
 
   const [showVideo, setShowVideo] = useState(true);
-  const [owningHand, setOwningHand] = useState<OwningHand>(null);
   const [windowSize, setWindowSize] = useState({ width: window.innerWidth, height: window.innerHeight });
 
   // Track window resize for LandmarkOverlay dimensions
@@ -33,11 +41,6 @@ function App() {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
-  // Derive combined state for legacy code paths
-  const activeHand = owningHand === 'left' ? leftHand : owningHand === 'right' ? rightHand : null;
-  const worldPosition = activeHand?.worldPosition ?? null;
-  const isGrabbing = activeHand?.isGrabbing ?? false;
 
   // Track hand detection state for aria-live announcements
   const wasHandDetected = useRef(false);
@@ -52,74 +55,33 @@ function App() {
     }
   }, [hands]);
 
-  // Object handoff logic between hands
+  // Update left cube: visible when hand is open (not grabbing)
   useEffect(() => {
-    const leftGrabbing = leftHand?.isGrabbing ?? false;
-    const rightGrabbing = rightHand?.isGrabbing ?? false;
-
-    if (owningHand === null) {
-      // No owner - first hand to grab gets ownership
-      if (leftGrabbing) {
-        setOwningHand('left');
-      } else if (rightGrabbing) {
-        setOwningHand('right');
-      }
-    } else if (owningHand === 'left') {
-      // Left owns - check for handoff
-      if (!leftGrabbing && rightGrabbing) {
-        // Left released, right is grabbing -> transfer
-        setOwningHand('right');
-      } else if (!leftGrabbing && !rightGrabbing) {
-        // Both released -> keep ownership (object stays in place)
-      }
-      // If both grabbing -> keep left (no fighting)
-    } else if (owningHand === 'right') {
-      // Right owns - check for handoff
-      if (!rightGrabbing && leftGrabbing) {
-        // Right released, left is grabbing -> transfer
-        setOwningHand('left');
-      } else if (!rightGrabbing && !leftGrabbing) {
-        // Both released -> keep ownership (object stays in place)
-      }
-      // If both grabbing -> keep right (no fighting)
-    }
-  }, [leftHand?.isGrabbing, rightHand?.isGrabbing, owningHand]);
-
-  // Move selected object when grabbing (with Y offset so object hovers above hand)
-  useEffect(() => {
-    if (isGrabbing && selectedId && worldPosition) {
+    if (leftHand && !leftHand.isGrabbing && leftHand.worldPosition) {
       const offsetPosition: [number, number, number] = [
-        worldPosition[0],
-        worldPosition[1] + 0.5, // Object hovers above hand
-        worldPosition[2],
+        leftHand.worldPosition[0],
+        leftHand.worldPosition[1] + CUBE_Y_OFFSET,
+        leftHand.worldPosition[2],
       ];
-      updateObjectPosition(selectedId, offsetPosition);
+      updateLeftCube(offsetPosition, true);
+    } else {
+      updateLeftCube(null, false);
     }
-  }, [isGrabbing, selectedId, worldPosition, updateObjectPosition]);
+  }, [leftHand, updateLeftCube]);
 
-  // Auto-select object when grabbing near it
+  // Update right cube: visible when hand is open (not grabbing)
   useEffect(() => {
-    if (isGrabbing && !selectedId && worldPosition) {
-      const nearObject = objects.find((obj) => {
-        const dx = obj.position[0] - worldPosition[0];
-        const dy = obj.position[1] - worldPosition[1];
-        const dz = obj.position[2] - worldPosition[2];
-        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        return distance < 1;
-      });
-      if (nearObject) {
-        setSelected(nearObject.id);
-      }
+    if (rightHand && !rightHand.isGrabbing && rightHand.worldPosition) {
+      const offsetPosition: [number, number, number] = [
+        rightHand.worldPosition[0],
+        rightHand.worldPosition[1] + CUBE_Y_OFFSET,
+        rightHand.worldPosition[2],
+      ];
+      updateRightCube(offsetPosition, true);
+    } else {
+      updateRightCube(null, false);
     }
-  }, [isGrabbing, selectedId, worldPosition, objects, setSelected]);
-
-  // Release object when stop grabbing
-  useEffect(() => {
-    if (!isGrabbing && selectedId) {
-      // Keep selected for visual feedback, or uncomment to auto-release:
-      // setSelected(null);
-    }
-  }, [isGrabbing, selectedId]);
+  }, [rightHand, updateRightCube]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden text-white">
@@ -158,8 +120,8 @@ function App() {
           objects={objects}
           selectedId={selectedId}
           onSelect={setSelected}
-          handPosition={worldPosition}
-          isGrabbing={isGrabbing}
+          leftCube={leftCube}
+          rightCube={rightCube}
         />
       </div>
 
@@ -208,7 +170,7 @@ function App() {
         <DualFingerCountIndicator
           leftHand={leftHand ? { count: leftHand.extendedFingerCount, isGrabbing: leftHand.isGrabbing } : null}
           rightHand={rightHand ? { count: rightHand.extendedFingerCount, isGrabbing: rightHand.isGrabbing } : null}
-          owningHand={owningHand}
+          owningHand={null}
           isTracking={isTracking}
         />
       </div>
@@ -219,10 +181,10 @@ function App() {
           <div className="text-center space-y-4">
             <p className="text-xl">Click "Start Tracking" to begin</p>
             <p className="text-gray-400 text-sm">
-              Pinch (thumb + index) to grab and move the object
+              Open your hand to make a cube appear and follow your palm
             </p>
             <p className="text-gray-400 text-sm">
-              Swipe with open right hand to rotate the scene
+              Close your hand (pinch) to hide the cube
             </p>
           </div>
         </div>
