@@ -28,8 +28,8 @@ export function handToWorld(
   landmark: Landmark3D,
   config: MappingConfig = DEFAULT_CONFIG
 ): WorldCoords {
-  // Invert X to match camera perspective with mirrored video
-  const normalizedX = 1 - landmark.x;
+  // Use X directly (camera at Z=-5 already inverts perspective)
+  const normalizedX = landmark.x;
   // Invert Y because screen Y is top-down, world Y is bottom-up
   const normalizedY = 1 - landmark.y;
   // MediaPipe Z is roughly [-0.3, 0.3] relative to wrist
