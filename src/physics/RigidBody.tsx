@@ -6,6 +6,7 @@ import { Euler, Quaternion } from 'three';
 import { getRapier, getPhysicsWorld } from './world';
 import type { RigidBody as RapierRigidBody, Collider } from '@dimforge/rapier3d-compat';
 import type { PhysicsBodyDescriptor } from './types';
+import { registerRigidBody } from './useGrab';
 
 interface RigidBodyProps extends Partial<PhysicsBodyDescriptor> {
   children: ReactNode;
@@ -15,6 +16,8 @@ interface RigidBodyProps extends Partial<PhysicsBodyDescriptor> {
   shape?: 'cuboid' | 'sphere';
   /** Args for the collider shape (e.g., [halfX, halfY, halfZ] for cuboid, [radius] for sphere) */
   args?: number[];
+  /** Object ID for grab system mapping */
+  objectId?: string;
   /** Callback when rigid body is created */
   onBodyCreated?: (body: RapierRigidBody) => void;
 }
@@ -36,6 +39,7 @@ export function RigidBody({
   gravityScale = 1.0,
   shape = 'cuboid',
   args = [0.5, 0.5, 0.5],
+  objectId,
   onBodyCreated,
 }: RigidBodyProps) {
   const groupRef = useRef<Object3D>(null);
@@ -55,6 +59,7 @@ export function RigidBody({
     gravityScale,
     shape,
     args,
+    objectId,
     onBodyCreated,
   });
 
@@ -72,9 +77,10 @@ export function RigidBody({
       gravityScale,
       shape,
       args,
+      objectId,
       onBodyCreated,
     };
-  }, [position, rotation, type, mass, restitution, friction, linearDamping, angularDamping, gravityScale, shape, args, onBodyCreated]);
+  }, [position, rotation, type, mass, restitution, friction, linearDamping, angularDamping, gravityScale, shape, args, objectId, onBodyCreated]);
 
   // Create rigid body and collider on mount
   useEffect(() => {
@@ -158,6 +164,11 @@ export function RigidBody({
 
     const collider = world.createCollider(colliderDesc, rigidBody);
     colliderRef.current = collider;
+
+    // Register body with grab system if objectId provided
+    if (propsRef.current.objectId) {
+      registerRigidBody(rigidBody, propsRef.current.objectId);
+    }
 
     // Notify parent component
     if (propsRef.current.onBodyCreated) {

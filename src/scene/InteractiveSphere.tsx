@@ -7,6 +7,7 @@ interface InteractiveSphereProps {
   position: [number, number, number];
   isSelected: boolean;
   onSelect: (id: string | null) => void;
+  isGrabbable?: boolean;
 }
 
 export function InteractiveSphere({
@@ -14,6 +15,7 @@ export function InteractiveSphere({
   position,
   isSelected,
   onSelect,
+  isGrabbable: _isGrabbable = false,
 }: InteractiveSphereProps) {
   const meshRef = useRef<Mesh>(null);
   const [isHovered, setIsHovered] = useState(false);

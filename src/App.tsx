@@ -2,11 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { Scene } from './scene';
 import { useHandControl } from './hooks/useHandControl';
 import { useScene } from './hooks/useScene';
-import { LandmarkOverlay, DualFingerCountIndicator } from './components/feedback';
+import { useGrab, getBodyId } from './physics/useGrab';
+import { LandmarkOverlay, DualFingerCountIndicator, PhysicsInstructions } from './components/feedback';
 import { SignGame } from './components/game';
-
-// Y offset so cube floats above palm
-const CUBE_Y_OFFSET = 0.15;
 
 function App() {
   const {
@@ -24,16 +22,30 @@ function App() {
   const {
     objects,
     selectedId,
-    leftCube,
-    rightCube,
     setSelected,
-    updateLeftCube,
-    updateRightCube,
   } = useScene();
 
   const [showVideo, setShowVideo] = useState(true);
   const [showGame, setShowGame] = useState(false);
   const [windowSize, setWindowSize] = useState({ width: window.innerWidth, height: window.innerHeight });
+  const [grabbableId, setGrabbableId] = useState<string | null>(null);
+
+  // Grab/throw mechanics (for primary hand) - improved grab distance
+  const { grab, release, updateGrabbedPosition, getGrabInfo } = useGrab({
+    maxGrabDistance: 5.0,      // Increased from 2.0 - easier to grab
+    previewDistance: 6.0,       // Show feedback slightly beyond grab range
+    throwForce: 5.0,
+    releaseHysteresis: 0.1,     // Prevent accidental release on hand jitter
+  });
+
+  // Track grab preview state for visual feedback
+  const [grabPreview, setGrabPreview] = useState<{
+    canGrab: boolean;
+    distance: number | null;
+  }>({ canGrab: false, distance: null });
+
+  // Track previous grab state for edge detection
+  const wasGrabbing = useRef(false);
 
   // Track window resize for LandmarkOverlay dimensions
   useEffect(() => {
@@ -57,33 +69,48 @@ function App() {
     }
   }, [hands]);
 
-  // Update left cube: visible when hand is open (not grabbing)
-  useEffect(() => {
-    if (leftHand && !leftHand.isGrabbing && leftHand.worldPosition) {
-      const offsetPosition: [number, number, number] = [
-        leftHand.worldPosition[0],
-        leftHand.worldPosition[1] + CUBE_Y_OFFSET,
-        leftHand.worldPosition[2],
-      ];
-      updateLeftCube(offsetPosition, true);
-    } else {
-      updateLeftCube(null, false);
-    }
-  }, [leftHand, updateLeftCube]);
 
-  // Update right cube: visible when hand is open (not grabbing)
+  // Handle grab/throw mechanics (using primary hand)
   useEffect(() => {
-    if (rightHand && !rightHand.isGrabbing && rightHand.worldPosition) {
-      const offsetPosition: [number, number, number] = [
-        rightHand.worldPosition[0],
-        rightHand.worldPosition[1] + CUBE_Y_OFFSET,
-        rightHand.worldPosition[2],
-      ];
-      updateRightCube(offsetPosition, true);
-    } else {
-      updateRightCube(null, false);
+    const primaryHand = leftHand ?? rightHand;
+    if (!primaryHand || !primaryHand.worldPosition) {
+      wasGrabbing.current = false;
+      setGrabPreview({ canGrab: false, distance: null });
+      setGrabbableId(null);
+      return;
     }
-  }, [rightHand, updateRightCube]);
+
+    const isCurrentlyGrabbing = primaryHand.isGrabbing;
+
+    // Update grab preview for visual feedback (even when not grabbing)
+    if (!isCurrentlyGrabbing) {
+      const info = getGrabInfo(primaryHand.worldPosition);
+      const bodyId = getBodyId(info.nearestBody);
+      setGrabPreview({
+        canGrab: info.canGrab,
+        distance: info.distanceToNearest,
+      });
+      // Store the grabbable object ID separately for Scene
+      setGrabbableId(info.canGrab && bodyId ? bodyId : null);
+    }
+
+    // Detect grab start (edge: not grabbing -> grabbing)
+    if (isCurrentlyGrabbing && !wasGrabbing.current) {
+      grab(primaryHand.worldPosition);
+      setGrabPreview({ canGrab: false, distance: null });
+      setGrabbableId(null); // Clear grabbable highlight when grabbed
+    }
+    // Detect grab release (edge: grabbing -> not grabbing)
+    else if (!isCurrentlyGrabbing && wasGrabbing.current) {
+      release(primaryHand.velocity);
+    }
+    // While grabbing: update grabbed object position
+    else if (isCurrentlyGrabbing) {
+      updateGrabbedPosition(primaryHand.worldPosition);
+    }
+
+    wasGrabbing.current = isCurrentlyGrabbing;
+  }, [leftHand, rightHand, grab, release, updateGrabbedPosition, getGrabInfo]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden text-white">
@@ -122,8 +149,7 @@ function App() {
           objects={objects}
           selectedId={selectedId}
           onSelect={setSelected}
-          leftCube={leftCube}
-          rightCube={rightCube}
+          grabbableObjectId={grabbableId}
         />
       </div>
 
@@ -170,6 +196,24 @@ function App() {
       {error && (
         <div className="absolute top-16 left-0 right-0 px-6 py-2 bg-red-900/50 text-red-200 text-sm z-20">
           {error}
+        </div>
+      )}
+
+      {/* Physics instructions panel */}
+      <PhysicsInstructions
+        isGrabbing={(leftHand?.isGrabbing || rightHand?.isGrabbing) ?? false}
+        isTracking={isTracking}
+      />
+
+      {/* Grab preview indicator - shows when object is grabbable */}
+      {isTracking && grabPreview.canGrab && (
+        <div className="absolute bottom-20 left-4 z-20 px-3 py-2 bg-green-600/90 text-white text-sm rounded-lg shadow-lg animate-pulse">
+          Object in range - pinch to grab
+          {grabPreview.distance && (
+            <span className="ml-2 text-green-200">
+              ({grabPreview.distance.toFixed(1)}m)
+            </span>
+          )}
         </div>
       )}
 

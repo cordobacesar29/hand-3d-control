@@ -6,37 +6,73 @@ interface GrabState {
   isGrabbing: boolean;
   grabbedBody: RapierRigidBody | null;
   initialBodyType: 'dynamic' | 'kinematic' | 'fixed' | null;
+  releaseTimer: number;
+}
+
+// Global mapping from RigidBody to object ID
+const bodyToIdMap = new WeakMap<RapierRigidBody, string>();
+
+/**
+ * Register a rigid body with its object ID
+ */
+export function registerRigidBody(body: RapierRigidBody, id: string) {
+  bodyToIdMap.set(body, id);
+}
+
+/**
+ * Get the object ID for a rigid body
+ */
+export function getBodyId(body: RapierRigidBody | null): string | null {
+  if (!body) return null;
+  return bodyToIdMap.get(body) ?? null;
 }
 
 interface UseGrabOptions {
-  /** Maximum distance to grab an object (default: 2.0 meters) */
+  /** Maximum distance to grab an object (default: 5.0 meters) */
   maxGrabDistance?: number;
+  /** Distance at which objects highlight as grabbable (default: 6.0 meters) */
+  previewDistance?: number;
   /** Velocity multiplier when throwing (default: 5.0) */
   throwForce?: number;
+  /** Delay before releasing on jitter (default: 0.1 seconds) */
+  releaseHysteresis?: number;
+}
+
+export interface GrabInfo {
+  nearestBody: RapierRigidBody | null;
+  canGrab: boolean;
+  distanceToNearest: number | null;
 }
 
 export function useGrab(options: UseGrabOptions = {}) {
-  const { maxGrabDistance = 2.0, throwForce = 5.0 } = options;
+  const {
+    maxGrabDistance = 5.0,
+    previewDistance = 6.0,
+    throwForce = 5.0,
+    releaseHysteresis = 0.1
+  } = options;
 
   const grabState = useRef<GrabState>({
     isGrabbing: false,
     grabbedBody: null,
     initialBodyType: null,
+    releaseTimer: 0,
   });
 
   /**
-   * Find the nearest dynamic rigid body within grab distance
+   * Find the nearest dynamic rigid body and return body + distance info
    */
   const findNearestBody = useCallback(
-    (position: [number, number, number]): RapierRigidBody | null => {
+    (position: [number, number, number], maxDistance: number): { body: RapierRigidBody | null; distance: number | null } => {
       const world = getPhysicsWorld();
       let nearestBody: RapierRigidBody | null = null;
-      let minDistance = maxGrabDistance;
+      let minDistance = Infinity;
 
       world.forEachRigidBody((body) => {
-        // Only grab dynamic bodies
+        // Only consider dynamic bodies (skip kinematic/fixed)
         if (!body.isDynamic()) return;
 
+        // Calculate 3D distance
         const translation = body.translation();
         const dx = translation.x - position[0];
         const dy = translation.y - position[1];
@@ -49,9 +85,13 @@ export function useGrab(options: UseGrabOptions = {}) {
         }
       });
 
-      return nearestBody;
+      // Return both body and distance (or null if none found within maxDistance)
+      return {
+        body: minDistance <= maxDistance ? nearestBody : null,
+        distance: nearestBody ? minDistance : null
+      };
     },
-    [maxGrabDistance]
+    []
   );
 
   /**
@@ -61,7 +101,7 @@ export function useGrab(options: UseGrabOptions = {}) {
     (handPosition: [number, number, number]) => {
       if (grabState.current.isGrabbing) return;
 
-      const body = findNearestBody(handPosition);
+      const { body } = findNearestBody(handPosition, maxGrabDistance);
       if (!body) return;
 
       // Validate body before operations
@@ -79,6 +119,7 @@ export function useGrab(options: UseGrabOptions = {}) {
           isGrabbing: true,
           grabbedBody: body,
           initialBodyType: bodyType,
+          releaseTimer: 0,
         };
 
         // Make body kinematic while grabbed (follows hand)
@@ -91,11 +132,12 @@ export function useGrab(options: UseGrabOptions = {}) {
           isGrabbing: false,
           grabbedBody: null,
           initialBodyType: null,
+          releaseTimer: 0,
         };
         console.error('Failed to grab body:', e);
       }
     },
-    [findNearestBody]
+    [findNearestBody, maxGrabDistance]
   );
 
   /**
@@ -112,11 +154,15 @@ export function useGrab(options: UseGrabOptions = {}) {
           isGrabbing: false,
           grabbedBody: null,
           initialBodyType: null,
+          releaseTimer: 0,
         };
         return;
       }
 
       try {
+        // Reset release timer while actively moving (no jitter)
+        grabState.current.releaseTimer = 0;
+
         // Move grabbed body to hand position
         grabbedBody.setNextKinematicTranslation({
           x: handPosition[0],
@@ -129,6 +175,7 @@ export function useGrab(options: UseGrabOptions = {}) {
           isGrabbing: false,
           grabbedBody: null,
           initialBodyType: null,
+          releaseTimer: 0,
         };
       }
     },
@@ -137,11 +184,19 @@ export function useGrab(options: UseGrabOptions = {}) {
 
   /**
    * Release the grabbed object and apply throw velocity
+   * Uses hysteresis to prevent accidental release on hand jitter
    */
   const release = useCallback(
-    (handVelocity: [number, number, number]) => {
-      const { isGrabbing, grabbedBody, initialBodyType } = grabState.current;
+    (handVelocity: [number, number, number], deltaTime: number = 0.016) => {
+      const { isGrabbing, grabbedBody, initialBodyType, releaseTimer } = grabState.current;
       if (!isGrabbing || !grabbedBody) return;
+
+      // Apply hysteresis - increment timer, only release after threshold
+      const newTimer = releaseTimer + deltaTime;
+      if (newTimer < releaseHysteresis) {
+        grabState.current.releaseTimer = newTimer;
+        return;
+      }
 
       // Validate body before operations
       if (!grabbedBody.isValid()) {
@@ -149,6 +204,7 @@ export function useGrab(options: UseGrabOptions = {}) {
           isGrabbing: false,
           grabbedBody: null,
           initialBodyType: null,
+          releaseTimer: 0,
         };
         return;
       }
@@ -176,15 +232,32 @@ export function useGrab(options: UseGrabOptions = {}) {
           isGrabbing: false,
           grabbedBody: null,
           initialBodyType: null,
+          releaseTimer: 0,
         };
       }
     },
-    [throwForce]
+    [throwForce, releaseHysteresis]
+  );
+
+  /**
+   * Get info about nearest grabbable object (for UI feedback)
+   */
+  const getGrabInfo = useCallback(
+    (handPosition: [number, number, number]): GrabInfo => {
+      const { body, distance } = findNearestBody(handPosition, previewDistance);
+      return {
+        nearestBody: body,
+        canGrab: distance !== null && distance <= maxGrabDistance,
+        distanceToNearest: distance,
+      };
+    },
+    [findNearestBody, previewDistance, maxGrabDistance]
   );
 
   return {
     grab,
     release,
     updateGrabbedPosition,
+    getGrabInfo,
   };
 }

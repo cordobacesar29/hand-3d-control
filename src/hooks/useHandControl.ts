@@ -7,6 +7,7 @@ interface SingleHandState {
   isGrabbing: boolean;
   extendedFingerCount: number;
   confidence: number;
+  velocity: [number, number, number];
 }
 
 interface HandControlState {
@@ -22,6 +23,8 @@ interface HandControlState {
   confidence: number;
   /** Legacy: finger count of first detected hand */
   extendedFingerCount: number;
+  /** Legacy: velocity of first detected hand */
+  velocity: [number, number, number];
 }
 
 interface UseHandControlReturn extends HandControlState {
@@ -37,17 +40,38 @@ interface UseHandControlReturn extends HandControlState {
  * Compute state for a single hand from landmarks
  */
 function computeHandState(
-  hand: import('../types/hand').HandLandmarks
+  hand: import('../types/hand').HandLandmarks,
+  prevPosition: [number, number, number] | null,
+  currentVelocity: [number, number, number]
 ): SingleHandState | null {
   const indexTip = getIndexTip(hand.landmarks);
   if (!indexTip) return null;
 
   const worldPos = handToWorld(indexTip);
+  const currentPosition: [number, number, number] = [worldPos.x, worldPos.y, worldPos.z];
+
+  // Calculate velocity delta
+  let newVelocity: [number, number, number] = [0, 0, 0];
+  if (prevPosition !== null) {
+    const delta: [number, number, number] = [
+      currentPosition[0] - prevPosition[0],
+      currentPosition[1] - prevPosition[1],
+      currentPosition[2] - prevPosition[2],
+    ];
+    // Smooth velocity: velocity = velocity * 0.5 + delta * 0.5
+    newVelocity = [
+      currentVelocity[0] * 0.5 + delta[0] * 0.5,
+      currentVelocity[1] * 0.5 + delta[1] * 0.5,
+      currentVelocity[2] * 0.5 + delta[2] * 0.5,
+    ];
+  }
+
   return {
-    worldPosition: [worldPos.x, worldPos.y, worldPos.z],
+    worldPosition: currentPosition,
     isGrabbing: isPinching(hand.landmarks),
     extendedFingerCount: countExtendedFingers(hand.landmarks),
     confidence: hand.score,
+    velocity: newVelocity,
   };
 }
 
@@ -72,11 +96,20 @@ export function useHandControl(): UseHandControlReturn {
     isGrabbing: false,
     confidence: 0,
     extendedFingerCount: 0,
+    velocity: [0, 0, 0],
   });
 
   // Track previous grab state for edge detection (per hand)
   const wasLeftGrabbing = useRef(false);
   const wasRightGrabbing = useRef(false);
+
+  // Track previous positions for velocity calculation (per hand)
+  const prevLeftPos = useRef<[number, number, number] | null>(null);
+  const prevRightPos = useRef<[number, number, number] | null>(null);
+
+  // Track smoothed velocity (per hand)
+  const leftVelocity = useRef<[number, number, number]>([0, 0, 0]);
+  const rightVelocity = useRef<[number, number, number]>([0, 0, 0]);
 
   useEffect(() => {
     if (hands.length === 0) {
@@ -87,9 +120,14 @@ export function useHandControl(): UseHandControlReturn {
         isGrabbing: false,
         confidence: 0,
         extendedFingerCount: 0,
+        velocity: [0, 0, 0],
       });
       wasLeftGrabbing.current = false;
       wasRightGrabbing.current = false;
+      prevLeftPos.current = null;
+      prevRightPos.current = null;
+      leftVelocity.current = [0, 0, 0];
+      rightVelocity.current = [0, 0, 0];
       return;
     }
 
@@ -100,12 +138,16 @@ export function useHandControl(): UseHandControlReturn {
     // Note: MediaPipe reports handedness from the camera's perspective,
     // and since video is mirrored, "Left" from MediaPipe is actually the user's RIGHT hand
     for (const hand of hands) {
-      const handState = computeHandState(hand);
-      if (!handState) continue;
-
       if (hand.handedness === 'Left') {
         // MediaPipe "Left" = user's right hand (mirrored video)
+        const handState = computeHandState(hand, prevRightPos.current, rightVelocity.current);
+        if (!handState) continue;
+
         rightHand = handState;
+        // Update velocity and previous position for next frame
+        rightVelocity.current = handState.velocity;
+        prevRightPos.current = handState.worldPosition;
+
         // Detect grab/release edges for right hand
         if (handState.isGrabbing && !wasRightGrabbing.current) {
           // Right hand just started grabbing
@@ -115,7 +157,14 @@ export function useHandControl(): UseHandControlReturn {
         wasRightGrabbing.current = handState.isGrabbing;
       } else {
         // MediaPipe "Right" = user's left hand (mirrored video)
+        const handState = computeHandState(hand, prevLeftPos.current, leftVelocity.current);
+        if (!handState) continue;
+
         leftHand = handState;
+        // Update velocity and previous position for next frame
+        leftVelocity.current = handState.velocity;
+        prevLeftPos.current = handState.worldPosition;
+
         // Detect grab/release edges for left hand
         if (handState.isGrabbing && !wasLeftGrabbing.current) {
           // Left hand just started grabbing
@@ -136,6 +185,7 @@ export function useHandControl(): UseHandControlReturn {
       isGrabbing: primaryHand?.isGrabbing ?? false,
       confidence: primaryHand?.confidence ?? 0,
       extendedFingerCount: primaryHand?.extendedFingerCount ?? 0,
+      velocity: primaryHand?.velocity ?? [0, 0, 0],
     });
   }, [hands]);
 

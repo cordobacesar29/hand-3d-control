@@ -7,6 +7,7 @@ interface InteractiveConeProps {
   position: [number, number, number];
   isSelected: boolean;
   onSelect: (id: string | null) => void;
+  isGrabbable?: boolean;
 }
 
 export function InteractiveCone({
@@ -14,6 +15,7 @@ export function InteractiveCone({
   position,
   isSelected,
   onSelect,
+  isGrabbable: _isGrabbable = false,
 }: InteractiveConeProps) {
   const meshRef = useRef<Mesh>(null);
   const [isHovered, setIsHovered] = useState(false);
